@@ -1,0 +1,72 @@
+name: Bridge reviewed bootstrap acceptance
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: bridge-bootstrap-acceptance
+  cancel-in-progress: false
+jobs:
+  candidate:
+    if: github.repository == 'Skimbee/hermes-bridge-release-lab' && github.ref == 'refs/heads/lab-controller'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Build accepted independent toolchain and controller
+        run: |
+          docker build --tag bridge-e2e-toolchain:local container-e2e
+          python3 -m venv controller-env
+          controller-env/bin/pip install playwright==1.55.0
+      - name: Fresh exact-head SDK and integration tests in container
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: controller-env/bin/python bootstrap_candidate.py
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: bootstrap-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            e2e-input/receipt.json
+            e2e-input/candidate.bundle
+            evidence/bootstrap-tests-diagnostic.txt
+          if-no-files-found: error
+          retention-days: 7
+  dashboard:
+    needs: candidate
+    if: github.repository == 'Skimbee/hermes-bridge-release-lab' && github.ref == 'refs/heads/lab-controller'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Authenticate original candidate job and artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 bootstrap_dashboard_prepare.py
+      - name: Build accepted independent toolchain and external browser
+        run: |
+          docker build --tag bridge-e2e-toolchain:local container-e2e
+          python3 -m venv controller-env
+          controller-env/bin/pip install playwright==1.55.0
+          controller-env/bin/python -m playwright install --with-deps chromium
+      - name: Real native Dashboard update and stopped-container inspection
+        run: controller-env/bin/python container-e2e/controller.py
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: bootstrap-dashboard-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            evidence/result.json
+            evidence/install-diagnostic.txt
+            evidence/dashboard-diagnostic.txt
+            e2e-input/binding.json
+            e2e-input/original-receipt.json
+          if-no-files-found: error
+          retention-days: 7
