@@ -81,7 +81,11 @@ def main():
             context=browser.new_context(service_workers='block',accept_downloads=False)
             context.route('**/*',lambda route:route.continue_() if route.request.url.startswith('http://127.0.0.1:19119/') else route.abort())
             page=context.new_page();page.goto(url,wait_until='domcontentloaded')
-            page.get_by_role('button',name='Check for updates',exact=True).click(timeout=90000)
+            with page.expect_response(lambda r:'/api/hermes/update/check' in r.url,timeout=90000) as checked:
+                page.get_by_role('button',name='Check for updates',exact=True).click(timeout=90000)
+            update_info=checked.value.json()
+            result['update_check']={k:v for k,v in update_info.items() if k in ('available','update_available','error','message','reason','managed_externally','install_method','current_sha','latest_sha','behind','ahead')}
+            result['system_page_text']=page.locator('body').inner_text()[-6000:]
             page.get_by_role('button',name='Update now',exact=True).click(timeout=90000)
             with page.expect_response(lambda r:r.request.method=='POST' and r.url.endswith('/api/hermes/update'),timeout=60000) as response:
                 page.get_by_role('button',name='Update now',exact=True).last.click()
