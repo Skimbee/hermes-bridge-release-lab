@@ -44,6 +44,8 @@ def main():
     assert hc['Memory']==268435456 and hc['PidsLimit']==64
     run=subprocess.run(['docker','start','--attach',name],capture_output=True,text=True,timeout=30)
     assert len(run.stdout)<8192 and len(run.stderr)<8192
+    if run.returncode!=0 or not run.stdout.strip():
+        raise RuntimeError(json.dumps({'sandbox_start_exit':run.returncode,'diagnostic':run.stderr[:4096]}))
     results=json.loads(run.stdout)
     assert all(v is True for v in results.values()) and len(results)==12,results
     state=json.loads(subprocess.check_output(['docker','inspect','--format','{{json .State}}',name],timeout=15))
