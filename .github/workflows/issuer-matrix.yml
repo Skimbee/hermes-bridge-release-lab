@@ -1,0 +1,44 @@
+name: Bridge issuer negative acceptance matrix
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  checks: write
+concurrency:
+  group: issuer-negative-matrix
+  cancel-in-progress: false
+jobs:
+  matrix:
+    if: github.repository == 'Skimbee/hermes-bridge-release-lab' && github.ref == 'refs/heads/lab-controller'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: bridge-publisher
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        id: publisher
+        with:
+          app-id: ${{ vars.BRIDGE_APP_ID }}
+          private-key: ${{ secrets.BRIDGE_APP_PRIVATE_KEY }}
+          owner: Skimbee
+          repositories: hermes-bridge-release-lab
+          permission-contents: write
+          skip-token-revoke: false
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        id: verifier
+        with:
+          app-id: ${{ vars.BRIDGE_APP_ID }}
+          private-key: ${{ secrets.BRIDGE_APP_PRIVATE_KEY }}
+          owner: Skimbee
+          repositories: hermes-bridge-release-lab
+          permission-checks: write
+          skip-token-revoke: false
+      - name: Execute synthetic acceptance matrix without candidate code
+        env:
+          PUBLISH_TOKEN: ${{ steps.publisher.outputs.token }}
+          VERIFIER_TOKEN: ${{ steps.verifier.outputs.token }}
+          ACTIONS_TOKEN: ${{ github.token }}
+        run: python3 issuer_matrix.py
