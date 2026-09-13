@@ -7,7 +7,9 @@ TEXT='Synthetic fixture for exact-commit publication acceptance.\n'
 def validate(expected, current, candidate, parents):
     if not all(re.fullmatch('[0-9a-f]{40}',s) for s in (expected,current,candidate)):
         raise ValueError('Invalid SHA')
-    if current!=expected or candidate==expected or parents!=[expected]:
+    if (current!=expected or candidate==expected or len(parents) not in (1,2)
+            or parents[0]!=expected or len(set(parents))!=len(parents)
+            or not all(re.fullmatch('[0-9a-f]{40}',p) for p in parents)):
         raise ValueError('Stale base or unexpected candidate topology')
 
 def api(path, method='GET', data=None, checks=False):
@@ -24,11 +26,20 @@ def main():
         raise ValueError('Wrong repository or controller')
     mode=os.environ['MODE']
     base=api('git/ref/heads/main')['object']['sha']
-    if mode=='prepare':
+    if mode in ('prepare','prepare-merge'):
         parent=api('git/commits/'+base)
-        tree=api('git/trees','POST',{'base_tree':parent['tree']['sha'],'tree':[{'path':'scripts/lab-fixture.txt','mode':'100644','type':'blob','content':TEXT}]})
+        path='scripts/lab-merge-fixture.txt' if mode=='prepare-merge' else 'scripts/lab-fixture.txt'
+        tree=api('git/trees','POST',{'base_tree':parent['tree']['sha'],'tree':[{'path':path,'mode':'100644','type':'blob','content':TEXT}]})
         if tree['sha']==parent['tree']['sha']: raise ValueError('Fixture already present; no new candidate')
-        commit=api('git/commits','POST',{'message':'test: synthetic exact-SHA publication candidate','tree':tree['sha'],'parents':[base]})
+        parents=[base]
+        if mode=='prepare-merge':
+            if len(parent['parents'])!=1: raise ValueError('Expected linear base for divergence probe')
+            common=parent['parents'][0]['sha']
+            common_commit=api('git/commits/'+common)
+            upstream_tree=api('git/trees','POST',{'base_tree':common_commit['tree']['sha'],'tree':[{'path':path,'mode':'100644','type':'blob','content':TEXT}]})
+            upstream=api('git/commits','POST',{'message':'test: independent synthetic upstream','tree':upstream_tree['sha'],'parents':[common]})
+            parents.append(upstream['sha'])
+        commit=api('git/commits','POST',{'message':'test: synthetic exact-SHA publication candidate','tree':tree['sha'],'parents':parents})
         sha=commit['sha']; branch='lab/candidate-'+sha
         api('git/refs','POST',{'ref':'refs/heads/'+branch,'sha':sha})
         if api('git/ref/heads/'+branch)['object']['sha']!=sha: raise ValueError('Branch mismatch')
@@ -46,9 +57,14 @@ def main():
     if pr['user']['type']!='Bot': raise ValueError('PR is not bot-authored')
     commit=api('git/commits/'+sha)
     validate(base,api('git/ref/heads/main')['object']['sha'],sha,[p['sha'] for p in commit['parents']])
+    path='scripts/lab-merge-fixture.txt' if len(commit['parents'])==2 else 'scripts/lab-fixture.txt'
+    if len(commit['parents'])==2:
+        divergence=api('compare/'+base+'...'+commit['parents'][1]['sha'])
+        if divergence['status']!='diverged': raise ValueError('Parents do not have diverged history')
+        print('DIVERGED_TWO_PARENT_CANDIDATE',sha,flush=True)
     diff=api('compare/'+base+'...'+sha)
-    if [(f['filename'],f['status']) for f in diff['files']]!=[('scripts/lab-fixture.txt','added')]: raise ValueError('Unexpected diff')
-    content=api('contents/scripts/lab-fixture.txt?ref='+sha)
+    if [(f['filename'],f['status']) for f in diff['files']]!=[(path,'added')]: raise ValueError('Unexpected diff')
+    content=api('contents/'+path+'?ref='+sha)
     if content['type']!='file' or base64.b64decode(content['content']).decode()!=TEXT: raise ValueError('Wrong fixture')
     if not api('branches/main')['protected']: raise ValueError('Protection absent')
     def attempt(expect_rejection):
@@ -64,7 +80,7 @@ def main():
         if expect_rejection: raise RuntimeError('SECURITY FAILURE: main accepted unapproved candidate')
         if api('git/ref/heads/main')['object']['sha']!=sha: raise ValueError('Published SHA mismatch')
         print('EXACT_SHA_PUBLISHED',sha,flush=True)
-    if mode=='prepare':
+    if mode in ('prepare','prepare-merge'):
         attempt(True)
         check=api('check-runs','POST',{'name':CHECK,'head_sha':sha,'status':'completed','conclusion':'success','external_id':'synthetic-lab:'+sha,'output':{'title':'Synthetic candidate binding verified','summary':'Verified exact parent, unchanged base and only the fixed synthetic fixture. LAB ONLY; not a Hermes release test.'}},checks=True)
         observed=api('check-runs/'+str(check['id']),checks=True)

@@ -4,7 +4,7 @@ on:
     inputs:
       mode:
         type: choice
-        options: [prepare, publish]
+        options: [prepare, prepare-merge, publish]
         default: prepare
         required: true
       pr_number:
