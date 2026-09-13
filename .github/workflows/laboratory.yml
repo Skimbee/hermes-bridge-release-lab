@@ -1,0 +1,48 @@
+name: Protected exact-SHA laboratory
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        type: choice
+        options: [prepare, publish]
+        default: prepare
+        required: true
+      pr_number:
+        type: string
+        default: ''
+permissions:
+  contents: read
+  checks: write
+concurrency:
+  group: exact-sha-laboratory
+  cancel-in-progress: false
+jobs:
+  laboratory:
+    if: github.repository == 'Skimbee/hermes-bridge-release-lab' && github.ref == 'refs/heads/lab-controller'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: bridge-publisher
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Test local binding guards
+        run: python3 -m unittest -v test_lab
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        id: app
+        with:
+          app-id: ${{ vars.BRIDGE_APP_ID }}
+          private-key: ${{ secrets.BRIDGE_APP_PRIVATE_KEY }}
+          owner: Skimbee
+          repositories: hermes-bridge-release-lab
+          permission-contents: write
+          permission-pull-requests: write
+          skip-token-revoke: false
+      - name: Exercise protected GitHub references with synthetic data
+        env:
+          APP_TOKEN: ${{ steps.app.outputs.token }}
+          CHECK_TOKEN: ${{ github.token }}
+          MODE: ${{ inputs.mode }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+        run: python3 lab.py
