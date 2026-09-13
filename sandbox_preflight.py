@@ -34,7 +34,7 @@ def main():
     sentinel=pathlib.Path.cwd()/'trusted-controller-sentinel'; sentinel.write_text('external controller untouched\n')
     name='bridge-isolation-'+os.environ['GITHUB_RUN_ID']+'-'+os.environ['GITHUB_RUN_ATTEMPT']
     subprocess.run(['docker','pull',IMAGE],check=True,timeout=180)
-    subprocess.run(['docker','create','--name',name,'--read-only','--user','65532:65532','--cap-drop=ALL','--security-opt=no-new-privileges:true','--network=none','--pids-limit=64','--memory=256m','--cpus=1','--log-driver=local','--log-opt=max-size=1m','--log-opt=max-file=1','--tmpfs=/work:rw,nosuid,nodev,noexec,size=16m,mode=1777','--tmpfs=/tmp:rw,nosuid,nodev,noexec,size=16m,mode=1777','--env','PROBE_HOST_PATH='+str(sentinel),IMAGE,'python3','-I','-c',ATTACK],check=True,timeout=30)
+    subprocess.run(['docker','create','--name',name,'--read-only','--user','65532:65532','--cap-drop=ALL','--security-opt=no-new-privileges:true','--network=none','--pids-limit=64','--memory=256m','--cpus=1','--log-driver=local','--log-opt=max-size=1m','--log-opt=max-file=2','--tmpfs=/work:rw,nosuid,nodev,noexec,size=16m,mode=1777','--tmpfs=/tmp:rw,nosuid,nodev,noexec,size=16m,mode=1777','--env','PROBE_HOST_PATH='+str(sentinel),IMAGE,'python3','-I','-c',ATTACK],check=True,timeout=30)
     # Inspect trusted runtime config, not solely the attack process report.
     config=json.loads(subprocess.check_output(['docker','inspect',name],timeout=15))[0]
     hc=config['HostConfig']
