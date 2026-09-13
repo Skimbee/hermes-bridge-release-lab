@@ -62,7 +62,22 @@ def main():
                 if time.monotonic()>deadline:raise RuntimeError('Dashboard readiness timeout')
                 time.sleep(2)
         with sync_playwright() as p:
-            browser=p.chromium.launch(headless=True,chromium_sandbox=True)
+            executable=p.chromium.executable_path
+            assert executable.startswith('/home/runner/.cache/ms-playwright/chromium-') and executable.endswith('/chrome-linux/chrome')
+            # Chromium's documented narrow Ubuntu userns allowance: exact
+            # trusted browser path, never a global AppArmor/sysctl disable.
+            profile=OUT/'browser-userns.profile'
+            profile.write_text('abi <abi/4.0>,\ninclude <tunables/global>\nprofile bridge-browser '+executable+' flags=(unconfined) {\n  userns,\n}\n')
+            cmd(['sudo','apparmor_parser','-r',str(profile)])
+            browser=p.chromium.launch(headless=True,executable_path=executable,chromium_sandbox=True)
+            result['browser_version']=browser.version
+            result['browser_sandbox_requested']=True
+            sandbox_page=browser.new_page()
+            sandbox_page.goto('chrome://sandbox')
+            sandbox_text=' '.join(sandbox_page.locator('body').inner_text().split())
+            assert 'PID namespaces Yes' in sandbox_text and 'Seccomp-BPF sandbox Yes' in sandbox_text, sandbox_text
+            result['browser_sandbox_status']=sandbox_text
+            sandbox_page.close()
             context=browser.new_context(service_workers='block',accept_downloads=False)
             context.route('**/*',lambda route:route.continue_() if route.request.url.startswith('http://127.0.0.1:19119/') else route.abort())
             page=context.new_page();page.goto(url,wait_until='domcontentloaded')
