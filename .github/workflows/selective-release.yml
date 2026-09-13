@@ -1,0 +1,129 @@
+name: Bridge selective release integration lab
+on:
+  workflow_dispatch:
+    inputs:
+      fail_verifier:
+        type: boolean
+        default: false
+permissions:
+  contents: read
+  checks: read
+concurrency:
+  group: selective-release-lab
+  cancel-in-progress: false
+jobs:
+  prepare:
+    if: github.repository == 'Skimbee/hermes-bridge-release-lab' && github.ref == 'refs/heads/lab-controller'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: bridge-publisher
+    outputs:
+      base: ${{ steps.run.outputs.base }}
+      routine: ${{ steps.run.outputs.routine }}
+      control: ${{ steps.run.outputs.control }}
+      routine_pr: ${{ steps.run.outputs.routine_pr }}
+      control_pr: ${{ steps.run.outputs.control_pr }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        id: app
+        with:
+          app-id: ${{ vars.BRIDGE_APP_ID }}
+          private-key: ${{ secrets.BRIDGE_APP_PRIVATE_KEY }}
+          owner: Skimbee
+          repositories: hermes-bridge-release-lab
+          skip-token-revoke: false
+          permission-contents: write
+          permission-pull-requests: write
+      - id: run
+        env:
+          MODE: prepare
+          READ_TOKEN: ${{ github.token }}
+          APP_TOKEN: ${{ steps.app.outputs.token }}
+        run: python3 selective_release.py
+  verify:
+    needs: [prepare]
+    if: github.repository == 'Skimbee/hermes-bridge-release-lab' && github.ref == 'refs/heads/lab-controller'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - id: run
+        env:
+          MODE: verify
+          READ_TOKEN: ${{ github.token }}
+          BASE: ${{ needs.prepare.outputs.base }}
+          ROUTINE: ${{ needs.prepare.outputs.routine }}
+          CONTROL: ${{ needs.prepare.outputs.control }}
+          FAIL_VERIFIER: ${{ inputs.fail_verifier }}
+        run: python3 selective_release.py
+  attest:
+    needs: [prepare, verify]
+    if: github.repository == 'Skimbee/hermes-bridge-release-lab' && github.ref == 'refs/heads/lab-controller'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: bridge-publisher
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        id: app
+        with:
+          app-id: ${{ vars.BRIDGE_APP_ID }}
+          private-key: ${{ secrets.BRIDGE_APP_PRIVATE_KEY }}
+          owner: Skimbee
+          repositories: hermes-bridge-release-lab
+          skip-token-revoke: false
+          permission-checks: write
+      - id: run
+        env:
+          MODE: attest
+          READ_TOKEN: ${{ github.token }}
+          APP_TOKEN: ${{ steps.app.outputs.token }}
+          BASE: ${{ needs.prepare.outputs.base }}
+          ROUTINE: ${{ needs.prepare.outputs.routine }}
+          CONTROL: ${{ needs.prepare.outputs.control }}
+        run: python3 selective_release.py
+  publish:
+    needs: [prepare, verify, attest]
+    if: github.repository == 'Skimbee/hermes-bridge-release-lab' && github.ref == 'refs/heads/lab-controller'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: bridge-publisher
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        id: app
+        with:
+          app-id: ${{ vars.BRIDGE_APP_ID }}
+          private-key: ${{ secrets.BRIDGE_APP_PRIVATE_KEY }}
+          owner: Skimbee
+          repositories: hermes-bridge-release-lab
+          skip-token-revoke: false
+          permission-contents: write
+      - id: run
+        env:
+          MODE: publish
+          READ_TOKEN: ${{ github.token }}
+          APP_TOKEN: ${{ steps.app.outputs.token }}
+          BASE: ${{ needs.prepare.outputs.base }}
+          ROUTINE: ${{ needs.prepare.outputs.routine }}
+          CONTROL: ${{ needs.prepare.outputs.control }}
+        run: python3 selective_release.py
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: selective-release-${{ github.run_id }}-${{ github.run_attempt }}
+          path: selective-result.json
+          if-no-files-found: error
+          retention-days: 7
