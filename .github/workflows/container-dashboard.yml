@@ -27,7 +27,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           CANDIDATE_RUN: ${{ inputs.candidate_run }}
         run: |
-          python3 -m unittest -v test_lab test_provenance
+          python3 -m unittest -v test_lab test_provenance test_snapshot
           python3 container-e2e/prepare.py
       - name: Build trusted toolchain without candidate sources
         run: docker build --tag bridge-e2e-toolchain:local container-e2e

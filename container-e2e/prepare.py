@@ -45,6 +45,9 @@ def main():
         manifest.append({'path':name,'mode':mode,'oid':oid})
     (INPUT/'manifest.json').write_text(json.dumps(manifest))
     meta={'schema':2,'candidate_run':{'repository':REPO,'id':run['id'],'attempt':run['run_attempt'],'workflow_id':run['workflow_id'],'path':run['path'],'controller':run['head_sha'],'status':run['status'],'conclusion':run['conclusion'],'event':run['event']},'candidate_artifact':{'id':a['id'],'run_id':run['id'],'digest':a['digest'],'expired':a['expired']},'candidate':receipt['candidate'],'bundle_sha256':receipt['bundle_sha256'],'pre_head':base,'publication_enabled':False}
+    dashboard=json.loads(subprocess.check_output(['gh','api','repos/'+os.environ['GITHUB_REPOSITORY']+'/actions/runs/'+os.environ['GITHUB_RUN_ID']]))
+    assert dashboard['head_sha']==os.environ['GITHUB_SHA'] and dashboard['run_attempt']==int(os.environ['GITHUB_RUN_ATTEMPT'])
+    meta['dashboard_identity']={'repository':os.environ['GITHUB_REPOSITORY'],'id':dashboard['id'],'attempt':dashboard['run_attempt'],'workflow_id':dashboard['workflow_id'],'path':dashboard['path'],'controller':dashboard['head_sha'],'event':dashboard['event']}
     (INPUT/'binding.json').write_text(json.dumps(meta,indent=2))
     print('VERIFIED_INPUT',run['id'],a['id'],receipt['candidate'])
 if __name__=='__main__':main()

@@ -26,6 +26,9 @@ def main():
     assert os.environ.get('RUNNER_ENVIRONMENT')=='github-hosted' and os.environ['GITHUB_REPOSITORY']=='Skimbee/hermes-bridge-release-lab'
     assert os.environ['GITHUB_REF']=='refs/heads/lab-controller'
     result={**META,'passed':False,'dashboard_run':{'repository':os.environ['GITHUB_REPOSITORY'],'id':int(os.environ['GITHUB_RUN_ID']),'attempt':int(os.environ['GITHUB_RUN_ATTEMPT']),'controller':os.environ['GITHUB_SHA'],'path':'.github/workflows/container-dashboard.yml','event':os.environ['GITHUB_EVENT_NAME']},'isolation':'nonroot-container-external-controller','publication_enabled':False}
+    result['dashboard_run']=META['dashboard_identity']
+    assert result['dashboard_run']['controller']==os.environ['GITHUB_SHA']
+    assert result['dashboard_run']['id']==int(os.environ['GITHUB_RUN_ID'])
     started=False
     try:
         cmd(['docker','network','create','--subnet','172.30.220.0/24',NET])
