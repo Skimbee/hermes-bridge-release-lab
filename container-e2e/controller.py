@@ -1,0 +1,85 @@
+"""External controller for actual Dashboard update in unprivileged container."""
+import json,os,pathlib,subprocess,time,urllib.request
+from playwright.sync_api import sync_playwright
+ROOT=pathlib.Path.cwd(); OUT=ROOT/'evidence';OUT.mkdir(exist_ok=True)
+META=json.loads((ROOT/'e2e-input/binding.json').read_text())
+NAME='bridge-e2e-'+os.environ['GITHUB_RUN_ID'];VOL=NAME+'-data';NET=NAME+'-net';IMAGE='bridge-e2e-toolchain:local'
+def cmd(args,**kw):return subprocess.run(args,check=True,timeout=kw.pop('timeout',120),**kw)
+def capture(args,**kw):return subprocess.check_output(args,text=True,timeout=kw.pop('timeout',30),**kw)
+def main():
+    assert os.environ.get('RUNNER_ENVIRONMENT')=='github-hosted' and os.environ['GITHUB_REPOSITORY']=='Skimbee/hermes-bridge-release-lab'
+    assert os.environ['GITHUB_REF']=='refs/heads/lab-controller'
+    result={**META,'passed':False,'dashboard_run':{'repository':os.environ['GITHUB_REPOSITORY'],'id':int(os.environ['GITHUB_RUN_ID']),'attempt':int(os.environ['GITHUB_RUN_ATTEMPT']),'controller':os.environ['GITHUB_SHA'],'path':'.github/workflows/container-dashboard.yml','event':os.environ['GITHUB_EVENT_NAME']},'isolation':'nonroot-container-external-controller','publication_enabled':False}
+    started=False
+    try:
+        cmd(['docker','network','create','--subnet','172.30.220.0/24',NET])
+        # Allow replies to external controller; deny candidate-initiated host access.
+        cmd(['sudo','iptables','-I','INPUT','1','-s','172.30.220.0/24','-j','DROP'])
+        cmd(['sudo','iptables','-I','INPUT','1','-s','172.30.220.0/24','-m','conntrack','--ctstate','ESTABLISHED,RELATED','-j','ACCEPT'])
+        blocked=['0.0.0.0/8','10.0.0.0/8','100.64.0.0/10','127.0.0.0/8','169.254.0.0/16','172.16.0.0/12','192.0.0.0/24','192.168.0.0/16','198.18.0.0/15','224.0.0.0/4','240.0.0.0/4']
+        for dest in blocked:cmd(['sudo','iptables','-I','DOCKER-USER','1','-s','172.30.220.0/24','-d',dest,'-j','REJECT'])
+        cmd(['sudo','iptables','-I','DOCKER-USER','1','-s','172.30.220.0/24','-m','conntrack','--ctstate','ESTABLISHED,RELATED','-j','ACCEPT'])
+        cmd(['docker','volume','create',VOL])
+        cmd(['docker','create','--name',NAME,'--init','--user','10001:10001','--read-only','--cap-drop=ALL','--security-opt=no-new-privileges:true','--pids-limit=512','--memory=5g','--cpus=2','--log-driver=local','--log-opt=max-size=2m','--log-opt=max-file=2','--network',NET,'--publish','127.0.0.1:19119:19119','--mount','type=volume,source='+VOL+',target=/work','--tmpfs=/tmp:rw,nosuid,nodev,size=512m,mode=1777',IMAGE])
+        config=json.loads(capture(['docker','inspect',NAME]))[0]
+        assert config['HostConfig']['ReadonlyRootfs'] and config['HostConfig']['CapDrop']==['ALL']
+        assert not config['HostConfig']['Privileged'] and config['Config']['User']=='10001:10001'
+        assert len(config['Mounts'])==1 and config['Mounts'][0]['Name']==VOL
+        cmd(['docker','cp',str(ROOT/'e2e-input/fixture.git'),NAME+':/work/fixture.git'],timeout=240)
+        cmd(['docker','start',NAME]);started=True
+        # No candidate code has run yet. Probe actual outbound policy.
+        probe="import socket; targets=['172.30.220.1','169.254.169.254','10.0.0.1'];\nfor t in targets:\n s=socket.socket();s.settimeout(2)\n try:s.connect((t,80));raise RuntimeError('Private destination accessible')\n except OSError:pass\n finally:s.close()\nprint('PRIVATE_EGRESS_BLOCKED')"
+        cmd(['docker','exec',NAME,'python3','-I','-c',probe])
+        setup='mkdir -p /work/home/.hermes && printf "memory:\\n  provider: none\\ncurator:\\n  enabled: false\\n" > /work/home/.hermes/config.yaml && git clone --no-hardlinks /work/fixture.git /work/client && cd /work/client && git reset --hard '+META['pre_head']+' && uv sync --frozen --python 3.11 --extra web --extra hindsight && npm ci && npm run build --workspace web'
+        with open(OUT/'install-untrusted.log','w') as log:
+            cmd(['docker','exec',NAME,'sh','-c','ulimit -f 16384; '+setup],stdout=log,stderr=subprocess.STDOUT,timeout=1200)
+        cmd(['docker','exec','--detach','--workdir','/work/client',NAME,'sh','-c','ulimit -f 8192; exec /work/client/.venv/bin/python -m hermes_cli.main dashboard --host 0.0.0.0 --port 19119 --no-open --isolated --skip-build > /work/dashboard.log 2>&1'])
+        url='http://127.0.0.1:19119/system';deadline=time.monotonic()+180
+        while True:
+            try:
+                with urllib.request.urlopen(url,timeout=3) as r:assert r.status==200
+                break
+            except Exception:
+                if time.monotonic()>deadline:raise RuntimeError('Dashboard readiness timeout')
+                time.sleep(2)
+        with sync_playwright() as p:
+            browser=p.chromium.launch(headless=True,chromium_sandbox=True)
+            context=browser.new_context(service_workers='block',accept_downloads=False)
+            context.route('**/*',lambda route:route.continue_() if route.request.url.startswith('http://127.0.0.1:19119/') else route.abort())
+            page=context.new_page();page.goto(url,wait_until='domcontentloaded')
+            page.get_by_role('button',name='Check for updates',exact=True).click(timeout=90000)
+            page.get_by_role('button',name='Update now',exact=True).click(timeout=90000)
+            with page.expect_response(lambda r:r.request.method=='POST' and r.url.endswith('/api/hermes/update'),timeout=60000) as response:
+                page.get_by_role('button',name='Update now',exact=True).last.click()
+            assert response.value.ok;result['post_accepted']=True
+            deadline=time.monotonic()+900;receipt=None
+            while time.monotonic()<deadline:
+                try:
+                    page.goto(url,wait_until='domcontentloaded',timeout=10000)
+                    data=page.evaluate("""async()=>{const r=await fetch('/api/hermes/update/receipt',{headers:{'X-Hermes-Session-Token':window.__HERMES_SESSION_TOKEN__}});if(!r.ok)return null;const t=await r.text();if(t.length>131072)throw Error('receipt size');return JSON.parse(t)}""")
+                    summary=(data or {}).get('summary') or {}
+                    if summary.get('finished_at'):receipt=summary;break
+                except Exception:pass
+                time.sleep(5)
+            assert receipt is not None,'No final receipt'
+            assert receipt['pre_sha']==META['pre_head'] and receipt['post_sha']==META['candidate'] and receipt['outcome']=='success'
+            page.get_by_role('button',name='Check for updates',exact=True).wait_for(timeout=60000)
+            result['reconnected']=True
+            result['observed_receipt']={k:receipt[k] for k in ('pre_sha','post_sha','outcome')}
+            browser.close()
+        cmd(['docker','stop','--time','10',NAME]);started=False
+        assert not json.loads(capture(['docker','inspect','--format','{{json .State}}',NAME]))['Running']
+        payload=json.dumps({'candidate':META['candidate'],'manifest':json.loads((ROOT/'e2e-input/manifest.json').read_text())})
+        inspection=capture(['docker','run','--rm','--network=none','--read-only','--cap-drop=ALL','--security-opt=no-new-privileges:true','--user','10001:10001','--pids-limit=32','--memory=256m','--mount','type=volume,source='+VOL+',target=/snapshot,readonly','--interactive',IMAGE,'python3','-I','-c',(ROOT/'container-e2e/inspect_snapshot.py').read_text()],input=payload,timeout=180)
+        result.update(json.loads(inspection));result['passed']=True
+    finally:
+        if started:subprocess.run(['docker','stop','--time','10',NAME],timeout=30,capture_output=True)
+        (OUT/'result.json').write_text(json.dumps(result,indent=2))
+        # Do not upload raw candidate logs or tokens as trusted evidence.
+        if (OUT/'install-untrusted.log').exists():
+            text=(OUT/'install-untrusted.log').read_text(errors='replace')[-16000:]
+            import re
+            text=re.sub(r'(?im)^.*(?:token|password|secret|api.key|authorization).*$','[REDACTED]',text)
+            (OUT/'install-diagnostic.txt').write_text(text)
+        print(json.dumps({'passed':result['passed'],'candidate':META['candidate'],'publication_enabled':False}))
+if __name__=='__main__':main()

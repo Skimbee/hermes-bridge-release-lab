@@ -1,0 +1,52 @@
+name: Bridge container Dashboard E2E
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_run:
+        type: string
+        required: true
+        default: '34769147478'
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: container-dashboard-e2e
+  cancel-in-progress: false
+jobs:
+  dashboard:
+    if: github.repository == 'Skimbee/hermes-bridge-release-lab' && github.ref == 'refs/heads/lab-controller'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify local contracts and prepare authenticated candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_RUN: ${{ inputs.candidate_run }}
+        run: |
+          python3 -m unittest -v test_lab test_provenance
+          python3 container-e2e/prepare.py
+      - name: Build trusted toolchain without candidate sources
+        run: docker build --tag bridge-e2e-toolchain:local container-e2e
+      - name: Install trusted external browser controller
+        run: |
+          python3 -m venv controller-env
+          controller-env/bin/pip install playwright==1.55.0
+          controller-env/bin/python -m playwright install --with-deps chromium
+      - name: Real browser update with external offline snapshot inspection
+        run: controller-env/bin/python container-e2e/controller.py
+      - name: Preserve external result and bounded diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: container-dashboard-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            evidence/result.json
+            evidence/install-diagnostic.txt
+            e2e-input/binding.json
+            e2e-input/original-receipt.json
+          retention-days: 7
+          if-no-files-found: warn
