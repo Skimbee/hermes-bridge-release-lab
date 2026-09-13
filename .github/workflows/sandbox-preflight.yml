@@ -1,0 +1,19 @@
+name: Bridge hostile sandbox preflight
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  isolation:
+    if: github.repository == 'Skimbee/hermes-bridge-release-lab' && github.ref == 'refs/heads/lab-controller'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Test provenance contracts
+        run: python3 -m unittest -v test_lab test_provenance
+      - name: Attempt hostile accesses inside restricted container
+        run: python3 sandbox_preflight.py
