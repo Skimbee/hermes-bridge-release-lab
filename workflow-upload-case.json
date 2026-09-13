@@ -1,0 +1,7 @@
+{
+  "base": "67afb2cbe6c16fdee627833a602fda1af9b202f9",
+  "candidate": "9e15b84de07968cf0d0824c3f99f437063dff26d",
+  "path": ".github/workflows/lab-owner-upload.yml",
+  "content": "name: Synthetic owner-upload permission fixture\non:\n  workflow_dispatch:\npermissions: {}\njobs:\n  noop:\n    if: false\n    runs-on: ubuntu-24.04\n    steps:\n      - run: 'true'\n",
+  "target": "lab-workflow-permission"
+}
