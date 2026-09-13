@@ -49,8 +49,10 @@ def main():
         # No candidate code has run yet. Probe actual outbound policy.
         probe="import socket; targets=['172.30.220.1','169.254.169.254','10.0.0.1'];\nfor t in targets:\n s=socket.socket();s.settimeout(2)\n try:s.connect((t,80));raise RuntimeError('Private destination accessible')\n except OSError:pass\n finally:s.close()\nprint('PRIVATE_EGRESS_BLOCKED')"
         cmd(['docker','exec',NAME,'python3','-I','-c',probe])
-        setup='mkdir -p /work/home/.hermes && printf "memory:\\n  provider: none\\ncurator:\\n  enabled: false\\n" > /work/home/.hermes/config.yaml && git config --global --add safe.directory /work/fixture.git && git clone --no-hardlinks /work/fixture.git /work/client && cd /work/client && git reset --hard '+META['pre_head']+' && uv sync --frozen --python 3.11 --extra web --extra hindsight && npm ci && npm run build --workspace web'
+        setup='mkdir -p /work/home/.hermes && printf "memory:\\n  provider: none\\ncurator:\\n  enabled: false\\n" > /work/home/.hermes/config.yaml && git config --global --add safe.directory /work/fixture.git && git clone --bare --no-hardlinks /work/fixture.git /work/origin.git && git clone --no-hardlinks /work/origin.git /work/client && cd /work/client && git reset --hard '+META['pre_head']+' && uv sync --frozen --python 3.11 --extra web --extra hindsight && npm ci && npm run build --workspace web'
         logged(['docker','exec',NAME,'sh','-c',setup],OUT/'install-untrusted.log',1200)
+        advertised=capture(['docker','exec','--workdir','/work/client',NAME,'env','GIT_CONFIG_GLOBAL=/dev/null','GIT_CONFIG_NOSYSTEM=1','git','ls-remote','origin','refs/heads/main'])
+        assert advertised.split()[0]==META['candidate'], 'Origin unreachable under isolated Git configuration'
         cmd(['docker','exec','--detach','--workdir','/work/client',NAME,'sh','-c','exec /work/client/.venv/bin/python -m hermes_cli.main dashboard --host 127.0.0.1 --port 19119 --no-open --isolated --skip-build > /proc/1/fd/1 2>/proc/1/fd/2'])
         cmd(['docker','exec','--detach',NAME,'socat','TCP-LISTEN:19120,bind=0.0.0.0,reuseaddr,fork','TCP:127.0.0.1:19119'])
         url='http://127.0.0.1:19119/system';deadline=time.monotonic()+180
@@ -80,6 +82,7 @@ def main():
             sandbox_page.close()
             context=browser.new_context(service_workers='block',accept_downloads=False)
             context.route('**/*',lambda route:route.continue_() if route.request.url.startswith('http://127.0.0.1:19119/') else route.abort())
+            context.route_web_socket('**/*',lambda ws:ws.connect_to_server() if ws.url.startswith('ws://127.0.0.1:19119/') else ws.close())
             page=context.new_page();page.goto(url,wait_until='domcontentloaded')
             with page.expect_response(lambda r:'/api/hermes/update/check' in r.url,timeout=90000) as checked:
                 page.get_by_role('button',name='Check for updates',exact=True).click(timeout=90000)
