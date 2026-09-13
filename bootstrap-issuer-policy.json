@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "acceptance_run": 34774081455,
+  "acceptance_controller": "5a2d39c510f908d0c8b945f1798f22975e5a78c8",
+  "workflow_id": 357262225,
+  "manifest_sha256": "3ac95f2510e9d05dc77327da209a0977d350e16168e199968774a83945a5347f",
+  "candidate_artifact_id": 10322897745,
+  "candidate_artifact_digest": "sha256:bc600748e9e92cf91d05ae9e18e05301cc6b48d807226706a4a322e23331419b",
+  "dashboard_artifact_id": 10323102477,
+  "dashboard_artifact_digest": "sha256:63cfe612c77f457183e3096899a788797c919a0c0c8d9330cd86251f2e17c81f",
+  "fork_ci_run": 34773762793
+}

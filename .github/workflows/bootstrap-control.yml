@@ -1,0 +1,82 @@
+name: Bridge bootstrap owner-review preparation
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+  checks: read
+  pull-requests: read
+concurrency:
+  group: bridge-bootstrap-owner-review
+  cancel-in-progress: false
+jobs:
+  verify:
+    if: github.repository == 'Skimbee/hermes-bridge-release-lab' && github.ref == 'refs/heads/lab-controller'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 -m unittest -v test_bootstrap_verifier test_bootstrap_control
+          python3 bootstrap_verifier.py
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: bootstrap-proof-${{ github.run_id }}-${{ github.run_attempt }}
+          path: bootstrap-proof.json
+          if-no-files-found: error
+          retention-days: 7
+  author:
+    needs: verify
+    if: github.repository == 'Skimbee/hermes-bridge-release-lab' && github.ref == 'refs/heads/lab-controller'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: bridge-publisher
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        id: app
+        with:
+          app-id: ${{ vars.BRIDGE_APP_ID }}
+          private-key: ${{ secrets.BRIDGE_APP_PRIVATE_KEY }}
+          owner: Skimbee
+          repositories: hermes-agent
+          permission-pull-requests: write
+          skip-token-revoke: false
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          APP_TOKEN: ${{ steps.app.outputs.token }}
+          MODE: author
+        run: python3 bootstrap_control.py
+  attest:
+    needs: [verify, author]
+    if: github.repository == 'Skimbee/hermes-bridge-release-lab' && github.ref == 'refs/heads/lab-controller'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: bridge-publisher
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        id: app
+        with:
+          app-id: ${{ vars.BRIDGE_APP_ID }}
+          private-key: ${{ secrets.BRIDGE_APP_PRIVATE_KEY }}
+          owner: Skimbee
+          repositories: hermes-agent
+          permission-checks: write
+          skip-token-revoke: false
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          APP_TOKEN: ${{ steps.app.outputs.token }}
+          MODE: attest
+        run: python3 bootstrap_control.py
