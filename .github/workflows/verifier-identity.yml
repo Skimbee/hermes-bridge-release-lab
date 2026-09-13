@@ -1,0 +1,61 @@
+name: Bridge verifier identity acceptance
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verifier:
+    if: github.repository == 'Skimbee/hermes-bridge-release-lab' && github.ref == 'refs/heads/lab-controller'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: bridge-publisher
+    steps:
+      - name: Mint checks-only installation token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+        id: app
+        with:
+          app-id: ${{ vars.BRIDGE_APP_ID }}
+          private-key: ${{ secrets.BRIDGE_APP_PRIVATE_KEY }}
+          owner: Skimbee
+          repositories: hermes-bridge-release-lab
+          permission-checks: write
+          skip-token-revoke: false
+      - name: Independently inspect fixed synthetic candidate and issue check
+        env:
+          APP_TOKEN: ${{ steps.app.outputs.token }}
+          READ_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64,json,os,urllib.request
+          repo='Skimbee/hermes-bridge-release-lab'
+          sha='67afb2cbe6c16fdee627833a602fda1af9b202f9'
+          base='29d44dc3531161dc0ebbb89004638d1002583f28'
+          upstream='e0d4495a3ee02da91d4e718cb326569503ca6293'
+          def api(path,method='GET',data=None,app=False):
+              token=os.environ['APP_TOKEN' if app else 'READ_TOKEN']
+              request=urllib.request.Request('https://api.github.com/repos/'+repo+'/'+path,
+                  method=method,data=json.dumps(data).encode() if data is not None else None,
+                  headers={'Authorization':'Bearer '+token,'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28'})
+              with urllib.request.urlopen(request,timeout=20) as response:
+                  return json.load(response)
+          commit=api('git/commits/'+sha)
+          assert [p['sha'] for p in commit['parents']]==[base,upstream]
+          diff=api('compare/'+base+'...'+sha)
+          assert [(f['filename'],f['status']) for f in diff['files']]==[('scripts/lab-merge-fixture.txt','added')]
+          content=api('contents/scripts/lab-merge-fixture.txt?ref='+sha)
+          assert content['type']=='file'
+          assert base64.b64decode(content['content']).decode()=='Synthetic fixture for exact-commit publication acceptance.\n'
+          assert api('git/ref/heads/main')['object']['sha']==sha
+          result=api('check-runs','POST',{
+              'name':'Bridge release / exact-candidate','head_sha':sha,
+              'status':'completed','conclusion':'success',
+              'external_id':'identity-lab:'+os.environ['GITHUB_RUN_ID']+':'+os.environ['GITHUB_RUN_ATTEMPT'],
+              'details_url':'https://github.com/'+repo+'/actions/runs/'+os.environ['GITHUB_RUN_ID'],
+              'output':{'title':'Synthetic candidate verified by Bridge App','summary':'LAB ONLY. Fixed commit, parents, diff and fixture verified via read-only API. No candidate execution. Not Hermes release approval.'}},app=True)
+          readback=api('check-runs/'+str(result['id']),app=True)
+          assert readback['app']['id']==4931424
+          assert readback['head_sha']==sha and readback['conclusion']=='success'
+          print(json.dumps({'check_id':readback['id'],'app_id':readback['app']['id'],'head_sha':sha,'conclusion':readback['conclusion'],'candidate_executed':False}))
+          PY
