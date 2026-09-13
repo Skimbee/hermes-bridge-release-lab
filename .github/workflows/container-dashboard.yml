@@ -46,6 +46,7 @@ jobs:
           path: |
             evidence/result.json
             evidence/install-diagnostic.txt
+            evidence/dashboard-diagnostic.txt
             e2e-input/binding.json
             e2e-input/original-receipt.json
           retention-days: 7

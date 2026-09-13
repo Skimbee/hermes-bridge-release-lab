@@ -1,11 +1,27 @@
 """External controller for actual Dashboard update in unprivileged container."""
-import json,os,pathlib,subprocess,time,urllib.request
+import json,os,pathlib,subprocess,time,urllib.request,threading
 from playwright.sync_api import sync_playwright
 ROOT=pathlib.Path.cwd(); OUT=ROOT/'evidence';OUT.mkdir(exist_ok=True)
 META=json.loads((ROOT/'e2e-input/binding.json').read_text())
 NAME='bridge-e2e-'+os.environ['GITHUB_RUN_ID'];VOL=NAME+'-data';NET=NAME+'-net';IMAGE='bridge-e2e-toolchain:local'
 def cmd(args,**kw):return subprocess.run(args,check=True,timeout=kw.pop('timeout',120),**kw)
 def capture(args,**kw):return subprocess.check_output(args,text=True,timeout=kw.pop('timeout',30),**kw)
+def logged(args,path,timeout):
+    process=subprocess.Popen(args,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
+    def drain():
+        with open(path,'wb') as f:
+            remaining=2*1024*1024
+            while True:
+                chunk=process.stdout.read(8192)
+                if not chunk:break
+                f.write(chunk[:remaining]);remaining=max(0,remaining-len(chunk))
+    thread=threading.Thread(target=drain,daemon=True);thread.start()
+    try:
+        code=process.wait(timeout=timeout);thread.join(timeout=10)
+        if code:raise RuntimeError('Container installation failed: '+str(code))
+    finally:
+        if process.poll() is None:process.kill()
+
 def main():
     assert os.environ.get('RUNNER_ENVIRONMENT')=='github-hosted' and os.environ['GITHUB_REPOSITORY']=='Skimbee/hermes-bridge-release-lab'
     assert os.environ['GITHUB_REF']=='refs/heads/lab-controller'
@@ -30,10 +46,9 @@ def main():
         # No candidate code has run yet. Probe actual outbound policy.
         probe="import socket; targets=['172.30.220.1','169.254.169.254','10.0.0.1'];\nfor t in targets:\n s=socket.socket();s.settimeout(2)\n try:s.connect((t,80));raise RuntimeError('Private destination accessible')\n except OSError:pass\n finally:s.close()\nprint('PRIVATE_EGRESS_BLOCKED')"
         cmd(['docker','exec',NAME,'python3','-I','-c',probe])
-        setup='mkdir -p /work/home/.hermes && printf "memory:\\n  provider: none\\ncurator:\\n  enabled: false\\n" > /work/home/.hermes/config.yaml && git clone --no-hardlinks /work/fixture.git /work/client && cd /work/client && git reset --hard '+META['pre_head']+' && uv sync --frozen --python 3.11 --extra web --extra hindsight && npm ci && npm run build --workspace web'
-        with open(OUT/'install-untrusted.log','w') as log:
-            cmd(['docker','exec',NAME,'sh','-c','ulimit -f 16384; '+setup],stdout=log,stderr=subprocess.STDOUT,timeout=1200)
-        cmd(['docker','exec','--detach','--workdir','/work/client',NAME,'sh','-c','ulimit -f 8192; exec /work/client/.venv/bin/python -m hermes_cli.main dashboard --host 0.0.0.0 --port 19119 --no-open --isolated --skip-build > /work/dashboard.log 2>&1'])
+        setup='mkdir -p /work/home/.hermes && printf "memory:\\n  provider: none\\ncurator:\\n  enabled: false\\n" > /work/home/.hermes/config.yaml && git config --global --add safe.directory /work/fixture.git && git clone --no-hardlinks /work/fixture.git /work/client && cd /work/client && git reset --hard '+META['pre_head']+' && uv sync --frozen --python 3.11 --extra web --extra hindsight && npm ci && npm run build --workspace web'
+        logged(['docker','exec',NAME,'sh','-c',setup],OUT/'install-untrusted.log',1200)
+        cmd(['docker','exec','--detach','--workdir','/work/client',NAME,'sh','-c','exec /work/client/.venv/bin/python -m hermes_cli.main dashboard --host 0.0.0.0 --port 19119 --no-open --isolated --skip-build > /proc/1/fd/1 2>/proc/1/fd/2'])
         url='http://127.0.0.1:19119/system';deadline=time.monotonic()+180
         while True:
             try:
@@ -62,6 +77,7 @@ def main():
                 except Exception:pass
                 time.sleep(5)
             assert receipt is not None,'No final receipt'
+            result['observed_receipt']={k:receipt.get(k) for k in ('pre_sha','post_sha','outcome')}
             assert receipt['pre_sha']==META['pre_head'] and receipt['post_sha']==META['candidate'] and receipt['outcome']=='success'
             page.get_by_role('button',name='Check for updates',exact=True).wait_for(timeout=60000)
             result['reconnected']=True
@@ -74,6 +90,10 @@ def main():
         result.update(json.loads(inspection));result['passed']=True
     finally:
         if started:subprocess.run(['docker','stop','--time','10',NAME],timeout=30,capture_output=True)
+        logs=subprocess.run(['docker','logs','--tail','80',NAME],capture_output=True,text=True,timeout=15)
+        import re
+        diagnostic=re.sub(r'(?im)^.*(?:token|password|secret|api.key|authorization).*$', '[REDACTED]',(logs.stdout+logs.stderr)[-20000:])
+        (OUT/'dashboard-diagnostic.txt').write_text(diagnostic)
         (OUT/'result.json').write_text(json.dumps(result,indent=2))
         # Do not upload raw candidate logs or tokens as trusted evidence.
         if (OUT/'install-untrusted.log').exists():
