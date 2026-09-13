@@ -39,7 +39,7 @@ def main():
         for dest in blocked:cmd(['sudo','iptables','-I','DOCKER-USER','1','-s','172.30.220.0/24','-d',dest,'-j','REJECT'])
         cmd(['sudo','iptables','-I','DOCKER-USER','1','-s','172.30.220.0/24','-m','conntrack','--ctstate','ESTABLISHED,RELATED','-j','ACCEPT'])
         cmd(['docker','volume','create',VOL])
-        cmd(['docker','create','--name',NAME,'--init','--user','10001:10001','--read-only','--cap-drop=ALL','--security-opt=no-new-privileges:true','--pids-limit=512','--memory=5g','--cpus=2','--log-driver=local','--log-opt=max-size=2m','--log-opt=max-file=2','--network',NET,'--publish','127.0.0.1:19119:19119','--mount','type=volume,source='+VOL+',target=/work','--tmpfs=/tmp:rw,nosuid,nodev,size=512m,mode=1777',IMAGE])
+        cmd(['docker','create','--name',NAME,'--init','--user','10001:10001','--read-only','--cap-drop=ALL','--security-opt=no-new-privileges:true','--pids-limit=512','--memory=5g','--cpus=2','--log-driver=local','--log-opt=max-size=2m','--log-opt=max-file=2','--network',NET,'--publish','127.0.0.1:19119:19120','--mount','type=volume,source='+VOL+',target=/work','--tmpfs=/tmp:rw,nosuid,nodev,size=512m,mode=1777',IMAGE])
         config=json.loads(capture(['docker','inspect',NAME]))[0]
         assert config['HostConfig']['ReadonlyRootfs'] and config['HostConfig']['CapDrop']==['ALL']
         assert not config['HostConfig']['Privileged'] and config['Config']['User']=='10001:10001'
@@ -51,7 +51,8 @@ def main():
         cmd(['docker','exec',NAME,'python3','-I','-c',probe])
         setup='mkdir -p /work/home/.hermes && printf "memory:\\n  provider: none\\ncurator:\\n  enabled: false\\n" > /work/home/.hermes/config.yaml && git config --global --add safe.directory /work/fixture.git && git clone --no-hardlinks /work/fixture.git /work/client && cd /work/client && git reset --hard '+META['pre_head']+' && uv sync --frozen --python 3.11 --extra web --extra hindsight && npm ci && npm run build --workspace web'
         logged(['docker','exec',NAME,'sh','-c',setup],OUT/'install-untrusted.log',1200)
-        cmd(['docker','exec','--detach','--workdir','/work/client',NAME,'sh','-c','exec /work/client/.venv/bin/python -m hermes_cli.main dashboard --host 0.0.0.0 --port 19119 --no-open --isolated --skip-build > /proc/1/fd/1 2>/proc/1/fd/2'])
+        cmd(['docker','exec','--detach','--workdir','/work/client',NAME,'sh','-c','exec /work/client/.venv/bin/python -m hermes_cli.main dashboard --host 127.0.0.1 --port 19119 --no-open --isolated --skip-build > /proc/1/fd/1 2>/proc/1/fd/2'])
+        cmd(['docker','exec','--detach',NAME,'socat','TCP-LISTEN:19120,bind=0.0.0.0,reuseaddr,fork','TCP:127.0.0.1:19119'])
         url='http://127.0.0.1:19119/system';deadline=time.monotonic()+180
         while True:
             try:
