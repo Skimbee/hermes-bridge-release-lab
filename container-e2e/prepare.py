@@ -43,6 +43,17 @@ def main():
         assert kind=='blob', 'Submodule requires explicit inspection'
         name=path.decode('utf-8');assert not name.startswith('/') and '..' not in name.split('/')
         manifest.append({'path':name,'mode':mode,'oid':oid})
+    attributes=subprocess.check_output(['git','--git-dir='+str(INPUT/'fixture.git'),'check-attr','--source='+receipt['candidate'],'-z','--stdin','eol','filter','working-tree-encoding'],input=b''.join(e['path'].encode()+b'\0' for e in manifest)).split(b'\0')
+    assert attributes[-1]==b'' and (len(attributes)-1)%3==0
+    attrs={}
+    for i in range(0,len(attributes)-1,3):
+        path,key,value=(v.decode() for v in attributes[i:i+3]);attrs.setdefault(path,{})[key]=value
+    for entry in manifest:
+        values=attrs[entry['path']]
+        assert values['filter'] in ('unspecified','unset'), 'External Git filter not permitted'
+        assert values['working-tree-encoding'] in ('unspecified','unset'), 'Encoding requires explicit inspector support'
+        assert values['eol'] in ('unspecified','unset','lf','crlf')
+        entry['eol']=values['eol']
     (INPUT/'manifest.json').write_text(json.dumps(manifest))
     meta={'schema':2,'candidate_run':{'repository':REPO,'id':run['id'],'attempt':run['run_attempt'],'workflow_id':run['workflow_id'],'path':run['path'],'controller':run['head_sha'],'status':run['status'],'conclusion':run['conclusion'],'event':run['event']},'candidate_artifact':{'id':a['id'],'run_id':run['id'],'digest':a['digest'],'expired':a['expired']},'candidate':receipt['candidate'],'bundle_sha256':receipt['bundle_sha256'],'pre_head':base,'publication_enabled':False}
     dashboard=json.loads(subprocess.check_output(['gh','api','repos/'+os.environ['GITHUB_REPOSITORY']+'/actions/runs/'+os.environ['GITHUB_RUN_ID']]))

@@ -36,6 +36,10 @@ for entry in payload['manifest']:
         assert mode in ('100644','100755')
         data,actual_mode=read(path)
         assert bool(actual_mode&0o111)==(mode=='100755'),path
+        if entry.get('eol')=='crlf':
+            normalized=data.replace(b'\r\n',b'\n')
+            assert normalized.replace(b'\n',b'\r\n')==data, 'Noncanonical CRLF checkout: '+path
+            data=normalized
     digest=hashlib.sha1(b'blob '+str(len(data)).encode()+b'\0'+data).hexdigest()
     assert digest==entry['oid'],path
     count+=1

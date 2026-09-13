@@ -24,5 +24,15 @@ class SnapshotTests(unittest.TestCase):
         def change(r,p):
             (r/'src/file').unlink();(r/'src').rmdir();(r/'src').symlink_to('/etc')
         self.run_case(change,False)
+    def test_explicit_crlf_checkout(self):
+        def change(r,p):
+            (r/'src/file').write_bytes(b'content\r\n')
+            p['manifest'][0].update(eol='crlf',oid=hashlib.sha1(b'blob 8\0content\n').hexdigest())
+        self.run_case(change)
+    def test_crlf_not_silently_normalized(self):
+        def change(r,p):
+            (r/'src/file').write_bytes(b'content\r\n')
+            p['manifest'][0].update(oid=hashlib.sha1(b'blob 8\0content\n').hexdigest())
+        self.run_case(change,False)
     def test_parent_traversal(self):self.run_case(lambda r,p:p['manifest'][0].update(path='../outside'),False)
 if __name__=='__main__':unittest.main()
