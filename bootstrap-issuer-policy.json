@@ -1,12 +1,12 @@
 {
   "schema": 1,
-  "acceptance_run": 34774081455,
-  "acceptance_controller": "5a2d39c510f908d0c8b945f1798f22975e5a78c8",
+  "acceptance_run": 34820478178,
+  "acceptance_controller": "b9b9af6c25d5ee20ccf068234e6928a18a91d013",
   "workflow_id": 357262225,
-  "manifest_sha256": "3ac95f2510e9d05dc77327da209a0977d350e16168e199968774a83945a5347f",
-  "candidate_artifact_id": 10322897745,
-  "candidate_artifact_digest": "sha256:bc600748e9e92cf91d05ae9e18e05301cc6b48d807226706a4a322e23331419b",
-  "dashboard_artifact_id": 10323102477,
-  "dashboard_artifact_digest": "sha256:63cfe612c77f457183e3096899a788797c919a0c0c8d9330cd86251f2e17c81f",
-  "fork_ci_run": 34773762793
+  "manifest_sha256": "30b54aa1696a478ff4938de90ca5f9b85daa8496480cc34d2b1e48a0aa3bde26",
+  "candidate_artifact_id": 10337833357,
+  "candidate_artifact_digest": "sha256:d713fb6f73ec6a280b37c67d863f9a690975394585f219fbd7c92f5da9a481b6",
+  "dashboard_artifact_id": 10338406143,
+  "dashboard_artifact_digest": "sha256:1d083643d5c527c44d3e855fa0c1340e859b8c7a7c7b0813ddf894f03ba53d82",
+  "fork_ci_run": 34818794228
 }
