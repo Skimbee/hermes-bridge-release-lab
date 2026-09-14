@@ -19,6 +19,7 @@ jobs:
           persist-credentials: false
       - name: Build accepted independent toolchain and controller
         run: |
+          python3 -m unittest -v test_receipt_diagnostic
           docker build --tag bridge-e2e-toolchain:local container-e2e
           python3 -m venv controller-env
           controller-env/bin/pip install playwright==1.55.0
@@ -52,6 +53,7 @@ jobs:
         run: python3 bootstrap_dashboard_prepare.py
       - name: Build accepted independent toolchain and external browser
         run: |
+          python3 -m unittest -v test_receipt_diagnostic
           docker build --tag bridge-e2e-toolchain:local container-e2e
           python3 -m venv controller-env
           controller-env/bin/pip install playwright==1.55.0

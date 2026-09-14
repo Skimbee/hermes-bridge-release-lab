@@ -104,6 +104,12 @@ def main():
                 time.sleep(5)
             assert receipt is not None,'No final receipt'
             result['observed_receipt']={k:receipt.get(k) for k in ('pre_sha','post_sha','outcome')}
+            if receipt.get('outcome')!='success':
+                try:
+                    data['action_status']=page.evaluate("""async()=>{const r=await fetch('/api/actions/hermes-update/status',{signal:AbortSignal.timeout(5000),headers:{'X-Hermes-Session-Token':window.__HERMES_SESSION_TOKEN__}});if(!r.ok)return {};const t=await r.text();if(t.length>131072)throw Error('status size');return JSON.parse(t)}""")
+                except Exception as error:
+                    data['action_status_read_error']=type(error).__name__
+            result['update_diagnostic']=json.loads(capture(['python3','-I',str(ROOT/'container-e2e/receipt_diagnostic.py')],input=json.dumps(data),timeout=15))
             assert receipt['pre_sha']==META['pre_head'] and receipt['post_sha']==META['candidate'] and receipt['outcome']=='success'
             page.get_by_role('button',name='Check for updates',exact=True).wait_for(timeout=60000)
             result['reconnected']=True
